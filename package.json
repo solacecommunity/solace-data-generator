@@ -1,6 +1,6 @@
 {
   "name": "@solace-labs/solace-data-generator",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "This repo is an npm package used to generate random payloads and topics",
   "main": "index.js",
   "type": "module",
