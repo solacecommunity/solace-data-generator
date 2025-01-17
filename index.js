@@ -5,452 +5,922 @@ class SolaceDataGenerator {
     // Initialize any properties here
   }
 
-  static generateRandomPayload(payload) {
-    const generateContent = (parameter) => SolaceDataGenerator.prototype.generateContent.call(this, parameter);
-    function processObject(obj) {
-      const result = {};
-      for (const key in obj) {
-        const value = obj[key];
-        if (value.type === 'object') {
-          result[key] = processObject(value.properties || {});
-        } else if (value.type === 'array') {
-          var arrayLength = value.rule?.count || 2;
-          result[key] = Array.from({ length: arrayLength }, () =>
-            // 2. Check the subtype here
-            //    a. if its object --> process object
-            //    b. if its non object --> generate content
-            value.subType === 'object'
-              ? processObject(value.properties || {})
-              : generateContent(value)
-          );
-        } else {
-          value.rule
-            ? (result[key] = generateContent(value))
-            : (result[key] = generateContent({
-                rule: { group: `${capitalize(value.type)}Rules` },
-              }));
-        }
-      }
-      return result;
-    }
-    function capitalize(str) {
-      return str.charAt(0).toUpperCase() + str.slice(1);
-    }
+  static generateEventAndTopic(data) {
+    function process(data) {      
+      var backwardCompatibility = typeof data?.rule?.hasPayload === 'undefined' ? true : false;
+      var payloads = backwardCompatibility || data?.rule?.hasPayload  ? 
+                        SolaceDataGenerator.prototype.generateEvent({ 
+                          payload: data.rule.payload, count: data.count
+                        }) : 
+                        Array(data.count).fill({});
+      var events = [];
 
-    return processObject(payload);
-  }
-
-  static generateRandomTopic(item, payload) {
-    let topic = item.topic;
-    const mappedParams = new Set();
-    // Handle mappings if they exist
-    if (item.mappings && item.mappings.length > 0) {
-      // Process mappings for Topic Parameters
-      for (const mapping of item.mappings) {
-        if (mapping.target.type === 'Topic Parameter') {
-          // Get the value from payload using source field name
-          const payloadValue = payload[mapping.source.fieldName];
-          if (payloadValue !== undefined) {
-            // Replace the corresponding parameter in topic string
-            topic = topic.replace(
-              `{${mapping.target.fieldName}}`,
-              payloadValue
-            );
-            // Keep track of mapped parameters
-            mappedParams.add(mapping.target.fieldName);
+      var mappedTopicParams = [];
+      if (data.rule.mappings && data.rule.mappings.length) {
+        for (var j=0; j<data.rule.mappings.length; j++) {
+          if (data.rule.mappings[j].target.type === 'Topic Parameter') {
+            mappedTopicParams.includes(data.rule.mappings[j].target.fieldName) ? 
+              mappedTopicParams : mappedTopicParams.push(data.rule.mappings[j].target.fieldName)
           }
         }
       }
+    
+      for (var i=0; i<data.count; i++) {
+        var topicParams = {};
+        var keys = Object.keys(data.rule.topicParameters);
+        for (var kl=0; kl<keys.length; kl++) {
+          let value = SolaceDataGenerator.prototype.generateData({ rule: data.rule.topicParameters[keys[kl]].rule, count: 1});
+          topicParams[keys[kl]] = value ? value : '';
+        }
+        
+        var topic = data.rule.topic;
+        var topicValues = {};
+        for (var j=0; j<keys.length; j++) {
+          if (!mappedTopicParams.includes(keys[j]))
+          topic = topic.replace(`{${keys[j]}}`, topicParams[keys[j]]);
+          topicValues[`_${keys[j]}`] = topicParams[keys[j]];
+        }
+        var payload = data.count > 1 ? payloads[i] : payloads;
+
+        // apply mapping
+        if (data.rule.mappings && data.rule.mappings.length) {
+          for (var j=0; j<data.rule.mappings.length; j++) {
+            var mapping = data.rule.mappings[j];
+            var sourceVal = undefined;
+            var target = undefined;
+
+            if (mapping.source.type === 'Payload Parameter') {
+              let sourceName = mapping.source.name.replaceAll('.properties', '').replaceAll('[]', '');
+              sourceVal = SolaceDataGenerator.prototype.getSourceFieldValue(payload, sourceName);
+            } else {
+              sourceVal = topicValues[`_${mapping.source.name}`];
+            }
+
+            if (mapping.target.type === 'Payload Parameter') {
+              let targetName = mapping.target.name.replaceAll('.properties', '').replaceAll('[]', '');
+              SolaceDataGenerator.prototype.setTargetFieldValue(payload, targetName, sourceVal);
+            } else {
+              target = topicParams[mapping.target.name];          
+              for (var k=0; k<keys.length; k++) {
+                if (keys[k] === mapping.target.name) {
+                  if (mappedTopicParams.includes(keys[k]))
+                    topic = topic.replace(`{${keys[k]}}`, sourceVal);
+                  else
+                    topic = topic.replace(`{${keys[k]}}`, topicParams[keys[k]][i]);
+                }
+              }
+            }
+          }
+        }
+
+        events.push({
+          topic,
+          payload
+        })
+      }
+
+      return events
     }
-    // Handle remaining unmapped parameters with generated content
-    for (const param of Object.keys(item.topicParameters)) {
-      // Skip if parameter was already handled by mapping
-      if (!mappedParams.has(param)) {
-        const content = SolaceDataGenerator.prototype.generateContent.call(this, item.topicParameters[param]);
-        topic = topic.replace(`{${param}}`, content);
+  
+    return process(data);
+  }
+
+  generateEvent(data) {
+    var fakeObjects = [];
+    var count = data.count ? data.count : 1;
+    if (data.payload.type === 'array') {
+      if (data.payload.subType === 'object')
+        fakeObjects = SolaceDataGenerator.prototype.processObjectRules(data.payload.properties, count);
+      else {
+        // console.log('here');
+        // need to test
+        // fakeObjects = Array(count).fill(fakeDataValueGenerator({ rule: data.payload, count: 1}));
+      }
+    } else if (!data.payload?.schema && (typeof data.payload?.type === 'object' || 
+               data.payload?.type === 'object' || !data.payload?.type)) {
+      fakeObjects = SolaceDataGenerator.prototype.processObjectRules(data.payload, count);
+    } else if (data.payload?.schema) {
+      fakeObjects = SolaceDataGenerator.prototype.processBaseObjectRules(data.payload.schema, count);
+    } else {
+      fakeObjects = SolaceDataGenerator.prototype.processBaseObjectRules(data.payload, count);
+    }
+  
+    return fakeObjects
+  }
+    
+  generateObject(data) {
+    var objects = [];
+    var count = data.count ? data.count : 1;
+    if (data.payload.type === 'array') {
+      if (data.payload.subType === 'object')
+        objects = SolaceDataGenerator.prototype.processObjectRules(data.payload.properties, count);
+      else {
+        // need to test
+        // objects = Array(count).fill(fakeDataValueGenerator({ rule: data.payload, count: 1}));
+      }
+    } else if (!data.payload?.schema && (typeof data.payload?.type === 'object' || 
+               data.payload?.type === 'object' || !data.payload?.type)) {
+      objects = SolaceDataGenerator.prototype.processObjectRules(data.payload, count);
+    } else if (data.payload?.schema) {
+      objects = SolaceDataGenerator.prototype.processBaseObjectRules(data.payload.schema, count);
+    } else {
+      objects = SolaceDataGenerator.prototype.processBaseObjectRules(data.payload, count);
+    }
+  
+    return objects
+  }
+
+  generateData(data) {
+    var fakeData = [];
+    var count = data.count ? data.count : 1;
+    if (!data || !data.rule || !data.rule.group) {
+      console.log('here');
+      return;
+    }
+    
+    if (data.rule.group === 'StringRules')
+      fakeData = SolaceDataGenerator.prototype.processStringRules(data.rule, count);
+    else if (data.rule.group === 'NullRules')
+      fakeData = SolaceDataGenerator.prototype.processNullRules(data.rule, count);
+    else if (data.rule.group === 'NumberRules')
+      fakeData = SolaceDataGenerator.prototype.processNumberRules(data.rule, count);
+    else if (data.rule.group === 'BooleanRules')
+      fakeData = SolaceDataGenerator.prototype.processBooleanRules(data.rule, count);
+    else if (data.rule.group === 'DateRules')
+      fakeData = SolaceDataGenerator.prototype.processDateRules(data.rule, count);
+    else if (data.rule.group === 'LoremRules')
+      fakeData = SolaceDataGenerator.prototype.processLoremRules(data.rule, count);
+    else if (data.rule.group === 'PersonRules')
+      fakeData = SolaceDataGenerator.prototype.processPersonRules(data.rule, count);
+    else if (data.rule.group === 'LocationRules')
+      fakeData = SolaceDataGenerator.prototype.processLocationRules(data.rule, count);
+    else if (data.rule.group === 'FinanceRules')
+      fakeData = SolaceDataGenerator.prototype.processFinanceRules(data.rule, count);
+    else if (data.rule.group === 'AirlineRules')
+      fakeData = SolaceDataGenerator.prototype.processAirlineRules(data.rule, count);
+    else if (data.rule.group === 'CommerceRules')
+      fakeData = SolaceDataGenerator.prototype.processCommerceRules(data.rule, count);
+    else if (data.rule.group === 'InternetRules')
+      fakeData = SolaceDataGenerator.prototype.processInternetRules(data.rule, count);
+
+    return fakeData;  
+  }
+
+  getSourceFieldValue (obj, path) {
+    if (path.indexOf('.') < 0)
+      return obj[path];
+  
+    let field = path.substring(0, path.indexOf('.'));
+    let fieldName = field.replaceAll('[0]', '');
+    var remaining = path.substring(path.indexOf('.')+1);
+    return SolaceDataGenerator.prototype.getSourceFieldValue(field.includes('[0]') ? obj[fieldName][0] : obj[field], remaining);
+  }
+          
+  setTargetFieldValue(obj, path, value) {
+    var tokens = path.split('.');
+    if (tokens.length <= 1) {
+      if (Array.isArray(obj)) {
+        obj.forEach(aObj => {
+          if (aObj.hasOwnProperty(path))
+            aObj[path] = value;
+          else
+          SolaceDataGenerator.prototype.setTargetFieldValue(aObj, path, value);
+        })
+      } else {
+        obj[path] = value;
+      }
+      return;
+    }
+  
+    let field = path.substring(0, path.indexOf('.'));
+    let fieldName = field.replaceAll('[0]', '');
+    var remaining = path.substring(path.indexOf('.')+1);
+    SolaceDataGenerator.prototype.setTargetFieldValue(field.includes('[0]') ? obj[fieldName][0] : obj[field], remaining, value);
+  }
+  
+  processStringRules(rule, count) {
+    var data = [];
+    var options = {};
+    var val = '';
+    if (rule.rule === 'alpha') {
+      options = {
+        length: {
+          min: rule.minLength,
+          max: rule.maxLength
+        },
+        casing: rule.casing
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.string.alpha(options));
+      }
+    } else if (rule.rule === 'alphanumeric') {
+      options = {
+        length: {
+          min: rule.minLength,
+          max: rule.maxLength
+        },
+        casing: rule.casing
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.string.alphanumeric(options));
+      }
+    } else if (rule.rule === 'enum') {
+      let enumObj = {};
+      let enumValue = {};
+      rule.enum.forEach((t) => {
+        enumObj[`'${t}'`] = t;
+      })
+      enumValue = Object.freeze(enumObj);
+  
+      for (var i=0; i<count; i++) {
+        if (rule.type === 'integer') {
+          try {
+            val = parseInt(faker.helpers.enumValue(enumValue));
+          } catch (error) {
+            val = faker.helpers.enumValue(enumValue);
+          }
+          data.push(val);
+        } else if (rule.type === 'number') {
+          try {
+            val = parseFloat(faker.helpers.enumValue(enumValue));
+          } catch (error) {
+            val = faker.helpers.enumValue(enumValue);
+          }
+          data.push(val);
+        } else if (rule.type === 'boolean') {
+          try {
+            val = parseBoolean(faker.helpers.enumValue(enumValue));
+          } catch (error) {
+            val = faker.helpers.enumValue(enumValue);
+          }
+          data.push(val);
+        } else {
+          data.push(faker.helpers.enumValue(enumValue));
+        }
+      }
+    } else if (rule.rule === 'words') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.lorem.words(rule.count));
+      }
+    } else if (rule.rule === 'nanoid') {
+      options = {
+        min: rule.minLength,
+        max: rule.maxLength
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.string.nanoid(options));
+      }
+    } else if (rule.rule === 'numeric') {
+      options = {
+        length: {
+          min: rule.minLength,
+          max: rule.maxLength
+        },
+        allowLeadingZeros: rule.leadingZeros
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.string.numeric(options));
+      }
+    } else if (rule.rule === 'symbol') {
+      options = {
+        min: rule.minLength,
+        max: rule.maxLength
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.string.symbol(options));
+      }
+    } else if (rule.rule === 'uuid') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.string.uuid());
+      }
+    } else if (rule.rule === 'fromRegExp') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.helpers.fromRegExp(rule.pattern));
+      }
+    } else if (rule.rule === 'phoneNumber') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.phone.number());
+      }
+    } else if (rule.rule === 'json') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.datatype.json());
+      }
+    } else if (rule.rule === 'static') {
+      for (var i=0; i<count; i++) {
+        data.push(rule.static);
       }
     }
-    return topic;
+  
+  
+    return count === 1 ? data[0] : data;
   }
-
-  generateContent(parameter) {
-    switch (parameter.rule?.group) {
-      case 'StringRules':
-        return SolaceDataGenerator.prototype.processStringRules.call(this, parameter.rule);
-      case 'NullRules':
-        return SolaceDataGenerator.prototype.processNullRules.call(this, parameter.rule);
-      case 'NumberRules':
-        return SolaceDataGenerator.prototype.processNumberRules.call(this, parameter.rule);
-      case 'BooleanRules':
-        return SolaceDataGenerator.prototype.processBooleanRules.call(this, parameter.rule);
-      case 'DateRules':
-        return SolaceDataGenerator.prototype.processDateRules.call(this, parameter.rule);
-      case 'LoremRules':
-        return SolaceDataGenerator.prototype.processLoremRules.call(this, parameter.rule);
-      case 'PersonRules':
-        return SolaceDataGenerator.prototype.processPersonRules.call(this, parameter.rule);
-      case 'LocationRules':
-        return SolaceDataGenerator.prototype.processLocationRules.call(this, parameter.rule);
-      case 'FinanceRules':
-        return SolaceDataGenerator.prototype.processFinanceRules.call(this, parameter.rule);
-      case 'AirlineRules':
-        return SolaceDataGenerator.prototype.processAirlineRules.call(this, parameter.rule);
-      case 'CommerceRules':
-        return SolaceDataGenerator.prototype.processCommerceRules.call(this, parameter.rule);
-      case 'InternetRules':
-        return SolaceDataGenerator.prototype.processInternetRules.call(this, parameter.rule);
-      default:
-        return 'NoRuleGroupFound';
-    }
-  }
-
-  processStringRules(rule) {
-    var options = {};
-    switch (rule.rule) {
-      case 'alpha':
-        options = {
-          length: {
-            min: rule.minLength,
-            max: rule.maxLength,
-          },
-          casing: rule.casing,
-        };
-        return faker.string.alpha(options);
-      case 'alphanumeric':
-        options = {
-          length: {
-            min: rule.minLength,
-            max: rule.maxLength,
-          },
-          casing: rule.casing,
-        };
-        return faker.string.alphanumeric(options);
-      case 'enum':
-        let enumObj = {};
-        rule.enum.forEach((t) => {
-          enumObj[`'${t}'`] = t;
-        });
-        return faker.helpers.enumValue(Object.freeze(enumObj));
-      case 'words':
-        return faker.lorem.words(rule.count);
-      case 'nanoid':
-        options = {
-          min: rule.minLength,
-          max: rule.maxLength,
-        };
-        return faker.string.nanoid(options);
-      case 'numeric':
-        options = {
-          length: {
-            min: rule.minLength,
-            max: rule.maxLength,
-          },
-          allowLeadingZeros: rule.leadingZeros,
-        };
-        return faker.string.numeric(options);
-      case 'symbol':
-        options = {
-          min: rule.minLength,
-          max: rule.maxLength,
-        };
-        return faker.string.symbol(options);
-      case 'uuid':
-        return faker.string.uuid();
-      case 'fromRegExp':
-        return faker.helpers.fromRegExp(rule.pattern);
-      case 'phoneNumber':
-        return faker.phone.number();
-      case 'json':
-        return faker.datatype.json();
-      default:
-        return faker.string.alpha(10);
-    }
-  }
-
-  processNullRules(rule) {
-    switch (rule.rule) {
-      case 'null':
-        return null;
-      case 'empty':
-        return '';
-      default:
-        return 'null';
-    }
-  }
-
-  processNumberRules(rule) {
-    var options = {};
-    switch (rule.rule) {
-      case 'int':
-        options = {
-          min: rule.minimum,
-          max: rule.maximum,
-        };
-        return faker.number.int(options);
-      case 'float':
-        options = {
-          min: rule.minimum,
-          max: rule.maximum,
-          fractionDigits: parseInt(rule.fractionDigits),
-        };
-        return faker.number.float(options);
-      default:
-        return faker.number.int(100);
-    }
-  }
-
-  processBooleanRules(rule) {
-    switch (rule.rule) {
-      case 'boolean':
-        return faker.datatype.boolean();
-      default:
-        return 'true';
-    }
-  }
-
-  processDateRules(rule) {
-    var options = {};
-    switch (rule.rule) {
-      case 'anytime':
-        return faker.date.anytime();
-      case 'future':
-        options = { years: rule.years };
-        return faker.date.future(options);
-      case 'past':
-        options = { years: rule.years };
-        return faker.date.past(options);
-      case 'recent':
-        options = { days: rule.days };
-        return faker.date.recent(options);
-      case 'soon':
-        options = { days: rule.days };
-        return faker.date.soon(options);
-      case 'month':
-        options = { abbreviated: rule.abbreviated };
-        return faker.date.month(options);
-      case 'weekday':
-        options = { abbreviated: rule.abbreviated };
-        return faker.date.weekday(options);
-      default:
-        return faker.date.anytime();
-    }
-  }
-
-  processLoremRules(rule) {
-    var options = {};
-    switch (rule.rule) {
-      case 'lines':
-        options = {
-          min: rule.minimum,
-          max: rule.maximum,
-        };
-        return faker.lorem.lines(options);
-      case 'paragraph':
-        options = {
-          min: rule.minimum,
-          max: rule.maximum,
-        };
-        return faker.lorem.paragraphs(options);
-      case 'sentence':
-        options = {
-          min: rule.minimum,
-          max: rule.maximum,
-        };
-        return faker.lorem.sentence(options);
-      case 'text':
-        return faker.lorem.text();
-      case 'word':
-        options = {
-          length: {
-            min: rule.minimum,
-            max: rule.maximum,
-          },
-        };
-        return faker.lorem.word(options);
-      default:
-        return faker.lorem.word(5);
-    }
-  }
-
-  processPersonRules(rule) {
-    switch (rule.rule) {
-      case 'prefix':
-        return faker.person.prefix();
-      case 'firstName':
-        return faker.person.firstName();
-      case 'lastName':
-        return faker.person.lastName();
-      case 'middleName':
-        return faker.person.middleName();
-      case 'fullName':
-        return faker.person.fullName();
-      case 'suffix':
-        return faker.person.suffix();
-      case 'sex':
-        return faker.person.sex();
-      case 'jobTitle':
-        return faker.person.jobTitle();
-      case 'jobDescriptor':
-        return faker.person.jobDescriptor();
-      case 'jobType':
-        return faker.person.jobType();
-      default:
-        return faker.person.firstName();
-    }
-  }
-
-  processLocationRules(rule) {
-    var options = {};
-    switch (rule.rule) {
-      case 'buildingNumber':
-        return faker.location.buildingNumber();
-      case 'street':
-        return faker.location.street();
-      case 'streetAddress':
-        return faker.location.streetAddress();
-      case 'city':
-        return faker.location.city();
-      case 'state':
-        return faker.location.state();
-      case 'zipCode':
-        return faker.location.zipCode();
-      case 'country':
-        return faker.location.countryCode();
-      case 'countryCode':
-        return faker.location.countryCode();
-      case 'latitude':
-        options = {
-          min: rule.minimum,
-          max: rule.maximum,
-          precision: parseInt(rule.precision),
-        };
-        return faker.location.latitude(options);
-      case 'longitude':
-        options = {
-          min: rule.minimum,
-          max: rule.maximum,
-          precision: parseInt(rule.precision),
-        };
-        return faker.location.longitude(options);
-      case 'timeZone':
-        return faker.location.timeZone();
-      default:
-        return faker.location.city();
-    }
-  }
-
-  processFinanceRules(rule) {
-    var options = {};
-    switch (rule.rule) {
-      case 'accountNumber':
-        return faker.finance.accountNumber();
-      case 'amount':
-        options = {
-          min: rule.minimum,
-          max: rule.maximum,
-        };
-        return faker.finance.amount(options);
-      case 'swiftOrBic':
-        return faker.finance.bic();
-      case 'creditCardNumber':
-        return faker.finance.creditCardNumber();
-      case 'currencyCode':
-        return faker.finance.currencyCode();
-      case 'currencyName':
-        return faker.finance.currencyName();
-      case 'currencySymbol':
-        return faker.finance.currencySymbol();
-      case 'bitcoinAddress':
-        return faker.finance.bitcoinAddress();
-      case 'ethereumAddress':
-        return faker.finance.ethereumAddress();
-      case 'transactionDescription':
-        return faker.finance.transactionDescription();
-      case 'transactionType':
-        return faker.finance.transactionType();
-      default:
-        return faker.finance.creditCardNumber();
-    }
-  }
-
-  processAirlineRules(rule) {
-    var options = {};
-    switch (rule.rule) {
-      case 'airline':
-        return faker.airline.airline();
-      case 'airplane':
-        const airplane = faker.airline.airplane();
-        return `${airplane.name} [${airplane.iataTypeCode}]`;
-      case 'airport':
-        const airport = faker.airline.airport();
-        return `${airport.name} [${airport.iataCode}]`;
-      case 'airportName':
-        return faker.airline.airport().name;
-      case 'airportCode':
-        return faker.airline.airport().iataCode;
-      case 'flightNumber':
-        options = {
-          length: {
-            min: rule.minimum,
-            max: rule.maximum,
-          },
-          addLeadingZeros: rule.leadingZeros,
-        };
-        return faker.airline.flightNumber(options);
-      default:
-        return faker.airline.airport().iataCode;
-    }
-  }
-
-  processCommerceRules(rule) {
-    var options = {};
-    switch (rule.rule) {
-      case 'companyName':
-        return faker.company.name();
-      case 'department':
-        return faker.commerce.department();
-      case 'isbn':
-        return faker.commerce.isbn();
-      case 'price':
-        options = {
-          min: rule.minimum,
-          max: rule.maximum,
-        };
-        return faker.commerce.price(options);
-      case 'product':
-        return faker.commerce.product();
-      case 'productDescription':
-        return faker.commerce.productDescription();
-      case 'productName':
-        return faker.commerce.productName();
-      default:
-        return faker.commerce.productName();
-    }
-  }
-  processInternetRules(rule) {
+  processNullRules(rule, count) {
     var data = [];
-    switch (rule.rule) {
-      case 'domainName':
-        return rule.casing === 'mixed' ? faker.internet.domainName() : rule.casing === 'upper' ? faker.internet.domainName().toUpperCase() : faker.internet.domainName().toLowerCase();
-      case 'domainWord':
-        return rule.casing === 'mixed' ? faker.internet.domainWord() : rule.casing === 'upper' ? faker.internet.domainName().toUpperCase() : faker.internet.domainName().toLowerCase();
-      case 'email':
-        return rule.casing === 'mixed' ? faker.internet.email() : rule.casing === 'upper' ? faker.internet.domainName().toUpperCase() : faker.internet.domainName().toLowerCase();
-      case 'emoji':
-        return faker.internet.emoji();
-      case 'ipv4':
-        return faker.internet.ipv4();
-      case 'ipv6':
-        return faker.internet.ipv6();
-      case 'mac':
-        return faker.internet.mac();
-      case 'url':
-        return rule.casing === 'mixed' ? faker.internet.url() : rule.casing === 'upper' ? faker.internet.domainName().toUpperCase() : faker.internet.domainName().toLowerCase();
-      case 'username':
-        return rule.casing === 'mixed' ? faker.internet.username() : rule.casing === 'upper' ? faker.internet.domainName().toUpperCase() : faker.internet.domainName().toLowerCase();
+    var options = {};
+  
+    if (rule.rule === 'null') {
+      for (var i=0; i<count; i++) {
+        data.push(null);
+      }
+    } else if (rule.rule === 'empty') {
+      for (var i=0; i<count; i++) {
+        data.push('');
+      }
     }
+    return count === 1 ? data[0] : data;
   }
+  processNumberRules(rule, count) {
+    var data = [];
+    var options = {};
+    if (rule.rule === 'int') {
+      options = {
+        min: rule.minimum,
+        max: rule.maximum
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.number.int(options));
+      }
+    } else if (rule.rule === 'float') {
+      options = {
+        min: rule.minimum,
+        max: rule.maximum,
+        fractionDigits: parseInt(rule.fractionDigits)
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.number.float(options));
+      }
+    } else if (rule.rule === 'countUp') {
+      rule.current = rule.current === undefined ? rule.start : rule.current;
+      for (var i=0; i<count; i++) {
+        data.push(rule.current);
+        rule.current += rule.change;
+      }
+    } else if (rule.rule === 'countDown') {
+      rule.current = rule.current === undefined ? rule.start : rule.current;
+      for (var i=0; i<count; i++) {
+        data.push(rule.current);
+        rule.current -= rule.change;
+      }
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+  processBooleanRules(rule, count) {
+    var data = [];
+  
+    if (rule.rule === 'boolean') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.datatype.boolean());
+      }
+      
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+  processDateRules(rule, count) {
+    var data = [];
+    var options = {};
+  
+    if (rule.rule === 'timeStamp') {
+      for (var i=0; i<count; i++) {
+        data.push(Date.now());
+      }
+    } else if (rule.rule === 'currentDate') {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        month: '2-digit',
+        day: '2-digit',
+        year: 'numeric',
+      });
+      
+      for (var i=0; i<count; i++) {
+          const [{ value: month }, , { value: day }, , { value: year }] = formatter.formatToParts(new Date());
+        if (rule.format === 'MM-DD-YYYY')
+          data.push(`${month}-${day}-${year}`);
+        else if (rule.format === 'DD-MM-YYYY')
+          data.push(`${day}-${month}-${year}`);
+      }
+    } else if (rule.rule === 'currentDateWithTime') {
+      let formatter = new Intl.DateTimeFormat("en-US", {
+        month: '2-digit',
+        day: '2-digit',
+        year: 'numeric',
+      });
+  
+      for (var i=0; i<count; i++) {
+        let date = new Date();
+        const [{ value: month }, , { value: day }, , { value: year }] = formatter.formatToParts(date);
+  
+        // Extract time components
+        const hours24 = date.getHours();
+        const hours12 = hours24 % 12 || 12; // Convert to 12-hour format
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        const amPm = hours24 < 12 ? 'AM' : 'PM';
+  
+        if (rule.format === 'MM-DD-YYYY HH:mm:ss')
+          data.push(`${month}-${day}-${year} ${String(hours24).padStart(2, '0')}:${minutes}:${seconds}`);
+        else if (rule.format === 'MM-DD-YYYY hh:mm:ss a')
+          data.push(`${month}-${day}-${year} ${hours12}:${minutes}:${seconds} ${amPm}`);
+        else if (rule.format === 'MM-DD-YYYY HH:mm:ss')
+          data.push(`${day}-${month}-${year} ${String(hours24).padStart(2, '0')}:${minutes}:${seconds}`);
+        else if (rule.format === 'MM-DD-YYYY hh:mm:ss a')
+          data.push(`${day}-${month}-${year} ${hours12}:${minutes}:${seconds} ${amPm}`);
+      }
+    } else if (rule.rule === 'currentTime') {
+      let formatter = new Intl.DateTimeFormat("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: rule.format.endsWith('a') ? true : false,
+      });
+  
+      for (var i=0; i<count; i++) {
+        let date = new Date();
+        data.push(formatter.format(date));
+      }
+    } else if (rule.rule === 'anytime') {
+      for (var i=0; i<count; i++) {
+        data.push(new Date(faker.date.anytime()).toDateString());
+      }
+    } else if (rule.rule === 'future') {
+      options = {
+        years: rule.years
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(new Date(faker.date.future(options)).toDateString());
+      }
+    } else if (rule.rule === 'past') {
+      options = {
+        years: rule.years
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(new Date(faker.date.past(options)).toDateString());
+      }
+    } else if (rule.rule === 'recent') {
+      options = {
+        days: rule.days
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(new Date(faker.date.recent()).toDateString());
+      }
+    } else if (rule.rule === 'soon') {
+      options = {
+        days: rule.days
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(new Date(faker.date.soon()).toDateString());
+      }
+    } else if (rule.rule === 'month') {
+      options = {
+        abbreviated: rule.abbreviated
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.date.month(options));
+      }
+    } else if (rule.rule === 'weekday') {
+      options = {
+        abbreviated: rule.abbreviated
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.date.weekday(options));
+      }
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+  processLoremRules(rule, count) {
+    var data = [];
+    var options = {};
+  
+    if (rule.rule === 'lines') {
+      options = {
+        min: rule.minimum,
+        max: rule.maximum
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.lorem.lines(options));
+      }
+    } else if (rule.rule === 'paragraph') {
+      options = {
+        min: rule.minimum,
+        max: rule.maximum
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.lorem.paragraphs(options));
+      }
+    } else if (rule.rule === 'sentence') {
+      options = {
+        min: rule.minimum,
+        max: rule.maximum
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.lorem.sentence(options));
+      }
+    } else if (rule.rule === 'text') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.lorem.text());
+      }
+    } else if (rule.rule === 'word') {
+      options = {
+        length: {
+          min: rule.minimum,
+          max: rule.maximum
+        }
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.lorem.word(options));
+      }
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+  processPersonRules(rule, count) {
+    var data = [];
+  
+    if (rule.rule === 'prefix') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.person.prefix());
+      }
+    } else if (rule.rule === 'firstName') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.person.firstName());
+      }
+    } else if (rule.rule === 'lastName') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.person.lastName());
+      }
+    } else if (rule.rule === 'middleName') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.person.middleName());
+      }
+    } else if (rule.rule === 'fullName') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.person.fullName());
+      }
+    } else if (rule.rule === 'suffix') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.person.suffix());
+      }
+    } else if (rule.rule === 'sex') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.person.sex());
+      }
+    } else if (rule.rule === 'jobTitle') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.person.jobTitle());
+      }
+    } else if (rule.rule === 'jobDescriptor') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.person.jobDescriptor());
+      }
+    } else if (rule.rule === 'jobType') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.person.jobType());
+      }
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+  processLocationRules(rule, count) {
+    var data = [];
+    var options = {};
+  
+    if (rule.rule === 'buildingNumber') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.buildingNumber());
+      }
+    } else if (rule.rule === 'street') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.street());
+      }
+    } else if (rule.rule === 'streetAddress') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.streetAddress());
+      }
+    } else if (rule.rule === 'city') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.city());
+      }
+    } else if (rule.rule === 'state') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.state());
+      }
+    } else if (rule.rule === 'zipCode') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.zipCode());
+      }
+    } else if (rule.rule === 'country') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.countryCode());
+      }
+    } else if (rule.rule === 'countryCode') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.countryCode());
+      }
+    } else if (rule.rule === 'latitude') {
+      options = {
+        min: rule.minimum,
+        max: rule.maximum,
+        precision: parseInt(rule.precision)
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.latitude(options));
+      }
+    } else if (rule.rule === 'longitude') {
+      options = {
+        min: rule.minimum,
+        max: rule.maximum,
+        precision: parseInt(rule.precision)
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.longitude(options));
+      }
+    } else if (rule.rule === 'timeZone') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.location.timeZone());
+      }
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+  processFinanceRules(rule, count) {
+    var data = [];
+    var options = {};
+  
+    if (rule.rule === 'accountNumber') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.accountNumber());
+      }
+    } else if (rule.rule === 'amount') {
+      options = {
+        min: rule.minimum,
+        max: rule.maximum,
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.amount(options));
+      }
+    } else if (rule.rule === 'swiftOrBic') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.bic());
+      }
+    } else if (rule.rule === 'creditCardNumber') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.creditCardNumber());
+      }
+    } else if (rule.rule === 'creditCardNumber') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.creditCardNumber());
+      }
+    } else if (rule.rule === 'currencyCode') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.currencyCode());
+      }
+    } else if (rule.rule === 'currencyName') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.currencyName());
+      }
+    } else if (rule.rule === 'currencySymbol') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.currencySymbol());
+      }
+    } else if (rule.rule === 'bitcoinAddress') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.bitcoinAddress());
+      }
+    } else if (rule.rule === 'ethereumAddress') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.ethereumAddress());
+      }
+    } else if (rule.rule === 'transactionDescription') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.transactionDescription());
+      }
+    } else if (rule.rule === 'transactionType') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.finance.transactionType());
+      }
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+  processAirlineRules(rule, count) {
+    var data = [];
+    var options = {};
+  
+    if (rule.rule === 'airline') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.airline.airline());
+      }
+    } else if (rule.rule === 'airplane') {
+      for (var i=0; i<count; i++) {
+        data.push(() => {
+          let ap = faker.airline.airplane();
+          return `${ap.name} [${ap.iataTypeCode}]`
+        });
+      }
+    } else if (rule.rule === 'airport') {
+      for (var i=0; i<count; i++) {
+        data.push(() => {
+          let ap = faker.airline.airport();
+          return `${ap.name} [${ap.iataCode}]`
+        });
+      }
+    } else if (rule.rule === 'airportName') {
+      for (var i=0; i<count; i++) {
+        data.push(() => {
+          let ap = faker.airline.airport();
+          return ap.name;
+        });
+      }
+    } else if (rule.rule === 'airportCode') {
+      for (var i=0; i<count; i++) {
+        data.push(() => {
+          let ap = faker.airline.airport();
+          return ap.iataCode;
+        });
+      }
+    } else if (rule.rule === 'flightNumber') {
+      options = {
+        length: {
+          min: rule.minimum,
+          max: rule.maximum
+        },
+        addLeadingZeros: rule.leadingZeros
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.airline.flightNumber(options));
+      }
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+  processCommerceRules(rule, count) {
+    var data = [];
+    var options = {};
+  
+    if (rule.rule === 'companyName') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.company.name());
+      }
+    } else if (rule.rule === 'department') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.commerce.department());
+      }
+    } else if (rule.rule === 'isbn') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.commerce.isbn());
+      }
+    } else if (rule.rule === 'price') {
+      options = {
+        min: rule.minimum,
+        max: rule.maximum,
+      }
+  
+      for (var i=0; i<count; i++) {
+        data.push(faker.commerce.price(options));
+      }
+    } else if (rule.rule === 'product') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.commerce.product());
+      }
+    } else if (rule.rule === 'productDescription') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.commerce.productDescription());
+      }
+    } else if (rule.rule === 'productName') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.commerce.productName());
+      }
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+  processInternetRules(rule, count) {
+    var data = [];
+    if (rule.rule === 'domainName') {
+      for (var i=0; i<count; i++) {
+        let value = faker.internet.domainName();
+        data.push(rule.casing === 'mixed' ? value : rule.casing === 'upper' ? value.toUpperCase() : value.toLowerCase());
+      }
+    } else if (rule.rule === 'domainWord') {
+      for (var i=0; i<count; i++) {
+        let value = faker.internet.domainWord();
+        data.push(rule.casing === 'mixed' ? value : rule.casing === 'upper' ? value.toUpperCase() : value.toLowerCase());
+      }
+    } else if (rule.rule === 'email') {
+      for (var i=0; i<count; i++) {
+        let value = faker.internet.email();
+        data.push(rule.casing === 'mixed' ? value : rule.casing === 'upper' ? value.toUpperCase() : value.toLowerCase());
+      }
+    } else if (rule.rule === 'emoji') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.internet.emoji());
+      }
+    } else if (rule.rule === 'ipv4') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.internet.ipv4());
+      }
+    } else if (rule.rule === 'ipv6') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.internet.ipv6());
+      }
+    } else if (rule.rule === 'mac') {
+      for (var i=0; i<count; i++) {
+        data.push(faker.internet.mac());
+      }
+    } else if (rule.rule === 'url') {
+      for (var i=0; i<count; i++) {
+        let value = faker.internet.url();
+        data.push(rule.casing === 'mixed' ? value : rule.casing === 'upper' ? value.toUpperCase() : value.toLowerCase());
+      }
+    } else if (rule.rule === 'username') {
+      for (var i=0; i<count; i++) {
+        let value = faker.internet.userName();
+        data.push(rule.casing === 'mixed' ? value : rule.casing === 'upper' ? value.toUpperCase() : value.toLowerCase());
+      }
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+
+  processObjectRules(payload, count) {
+    var data = [];
+  
+    for (var i=0; i<count; i++) {
+      data.push(SolaceDataGenerator.prototype.generateObject(payload));
+    }
+  
+    return count === 1 ? data[0] : data;
+  }
+  
+  generateArray(obj) {
+    var data = [];
+    if (obj.items && Object.keys(obj.items).length === 0)
+      return data;
+    var count = obj.rule.count ? obj.rule.count : 1;
+    for (var i=0; i<count; i++) {
+      if (obj.subType === 'object')
+        data.push(SolaceDataGenerator.prototype.generateObject(obj?.items?.properties ? obj.items.properties : obj.properties));
+      else if (obj.subType === 'array')
+        data.push(SolaceDataGenerator.prototype.generateObject(obj.items));
+      // else if (obj.subType === 'string') {
+      else
+        data.push(SolaceDataGenerator.prototype.generateData(obj));  
+    }
+  
+    return data;
+  }
+  
+  generateObject(obj) {
+    var data = {};
+    var keys = Object.keys(obj ? obj : {});
+    keys.forEach(key => {
+      if (obj[key].type === 'object')
+        data[key] = SolaceDataGenerator.prototype.generateObject(obj[key].properties);
+      else if (obj[key].type === 'array')
+        data[key] = SolaceDataGenerator.prototype.generateArray(obj[key]);
+      else if (typeof obj[key] === 'object' && !Object.keys(obj[key]).length)
+        data[key] = {}; // empty object (should we consider undefined!!)
+      else {
+        let value = SolaceDataGenerator.prototype.generateData(obj[key]);
+        // if (!value && obj[key].rule.rule === 'null') {
+        data[key] = value;
+      }
+    })
+  
+    return data;
+  }
+  
+  processBaseObjectRules(payload, count) {
+    var data = [];
+  
+    for (var i=0; i<count; i++) {
+      data.push(SolaceDataGenerator.prototype.generateData(payload));
+    }
+  
+    return count === 1 ? data[0] : data;
+  }  
 }
 
-export const generateRandomPayload = SolaceDataGenerator.generateRandomPayload;
-export const generateRandomTopic = SolaceDataGenerator.generateRandomTopic;
+export const generateEventAndTopic = SolaceDataGenerator.generateEventAndTopic;
