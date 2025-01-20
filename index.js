@@ -20,7 +20,7 @@ class SolaceDataGenerator {
             //    a. if its object --> process object
             //    b. if its non object --> generate content
             value.subType === 'object'
-              ? processObject(value.properties || {})
+              ? processObject(value.items.properties || value.items.properties || {})
               : generateContent(value)
           );
         } else {
@@ -427,6 +427,7 @@ class SolaceDataGenerator {
         return faker.commerce.productName();
     }
   }
+
   processInternetRules(rule) {
     var data = [];
     switch (rule.rule) {
