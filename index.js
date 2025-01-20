@@ -5,7 +5,16 @@ class SolaceDataGenerator {
     // Initialize any properties here
   }
 
-  static generateRandomPayload(payload) {
+  static generateEvent(event) {
+    const payload = SolaceDataGenerator.prototype.generateRandomPayload.call(this, event.payload);
+    const topic = SolaceDataGenerator.prototype.generateRandomTopic.call(this, event, payload);
+    return {
+      topic: topic,
+      payload: payload
+    };
+  }
+
+  generateRandomPayload(payload) {
     const generateContent = (parameter) => SolaceDataGenerator.prototype.generateContent.call(this, parameter);
     function processObject(obj) {
       const result = {};
@@ -40,7 +49,7 @@ class SolaceDataGenerator {
     return processObject(payload);
   }
 
-  static generateRandomTopic(item, payload) {
+  generateRandomTopic(item, payload) {
     let topic = item.topic;
     const mappedParams = new Set();
     // Handle mappings if they exist
@@ -453,5 +462,4 @@ class SolaceDataGenerator {
   }
 }
 
-export const generateRandomPayload = SolaceDataGenerator.generateRandomPayload;
-export const generateRandomTopic = SolaceDataGenerator.generateRandomTopic;
+export const generateEvent = SolaceDataGenerator.generateEvent;

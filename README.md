@@ -7,14 +7,12 @@ npm install @solace-labs/solace-data-generator
 ```
 
 ```
-import { generateRandomPayload, generateRandomTopic } from '@solace-labs/solace-data-generator';
+import { generateEvent } from '@solace-labs/solace-data-generator';
+const { payload, topic } = generateEvent(event);
 ```
 
-## generateRandomPayload(event.payload)
-This method generates a random payload given a schema
-
-## generateRandomTopic(event, genPayload)
-This method generates a random topic given mapping definitions and payload (generated from the `generateRandomPayload` function)
+### generateEvent(event)
+This method generates a random payload and topic given an event definition object
 
 ## Event definition format
 Event definitions is in the following format: 
@@ -95,7 +93,6 @@ Event definitions is in the following format:
     ]
 }
 ```
-
 
 ## Examples
 

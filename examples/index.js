@@ -1,4 +1,4 @@
-import { generateRandomPayload, generateRandomTopic } from '../index.js';
+import { generateEvent } from '../index.js';
 
 const event = {
   "topic": "acmeretail/oracleRetailOrder/INSERT/V1/{CHANNEL}/{SALES_REP_ID}/{ORDER_ID}",
@@ -508,8 +508,7 @@ const sap =  {
   ]
 };
 
-const payload = generateRandomPayload(sap.payload);
-const topic = generateRandomTopic(sap, payload);
+const { payload, topic } = generateEvent(sap);
 
 console.log('Payload:\n', JSON.stringify(payload, null, 2));
 console.log('Topic:', topic);
