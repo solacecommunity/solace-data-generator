@@ -230,46 +230,38 @@ const event = {
 
 const sap =  {
   "topic": "sap/erp/businesspartner/create/V1/{businessPartnerType}/{partnerId}",
-  "topicParameters": {
-    "partnerId": {
-      "schema": {
-        "type": "string"
+    "topicParameters": {
+      "partnerId": {
+        "schema": {
+          "type": "string"
+        },
+        "rule": {
+          "name": "partnerId",
+          "type": "string",
+          "group": "NumberRules",
+          "rule": "int",
+          "minimum": 1,
+          "maximum": 100
+        }
       },
-      "rule": {
-        "name": "partnerId",
-        "type": "string",
-        "group": "StringRules",
-        "rule": "alpha",
-        "casing": "mixed",
-        "minLength": 10,
-        "maxLength": 10
+      "businessPartnerType": {
+        "schema": {
+          "type": "string"
+        },
+        "rule": {
+          "name": "businessPartnerType",
+          "type": "string",
+          "group": "PersonRules",
+          "rule": "jobType"
+        }
       }
     },
-    "businessPartnerType": {
-      "schema": {
-        "type": "string"
-      },
-      "rule": {
-        "name": "businessPartnerType",
-        "type": "string",
-        "group": "StringRules",
-        "rule": "enum",
-        "enum": [
-          "PARTNER1",
-          "PARTNER2",
-          "PRTNER3"
-        ]
-      }
-    }
-  },
-  "eventName": "Business Partner Create",
-  "eventVersion": "0.1.0",
-  "messageName": "Business_Partner_Create",
-  "hasPayload": true,
-  "payload": {
-    "businessPartner": {
-      "type": "array",
-      "items": {
+    "eventName": "Business Partner Create",
+    "eventVersion": "0.1.0",
+    "messageName": "Business_Partner_Create",
+    "hasPayload": true,
+    "payload": {
+      "businessPartner": {
         "type": "object",
         "properties": {
           "firstName": {
@@ -277,11 +269,8 @@ const sap =  {
             "rule": {
               "name": "firstName",
               "type": "string",
-              "group": "StringRules",
-              "rule": "alpha",
-              "casing": "mixed",
-              "minLength": 10,
-              "maxLength": 10
+              "group": "PersonRules",
+              "rule": "firstName"
             }
           },
           "lastName": {
@@ -289,135 +278,91 @@ const sap =  {
             "rule": {
               "name": "lastName",
               "type": "string",
-              "group": "StringRules",
-              "rule": "alpha",
-              "casing": "mixed",
-              "minLength": 10,
-              "maxLength": 10
+              "group": "PersonRules",
+              "rule": "lastName"
             }
           },
           "addressLink": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "address": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "country": {
-                        "type": "string",
-                        "rule": {
-                          "name": "country",
-                          "type": "string",
-                          "group": "StringRules",
-                          "rule": "alpha",
-                          "casing": "mixed",
-                          "minLength": 10,
-                          "maxLength": 10
-                        }
-                      },
-                      "nation": {
-                        "type": "string",
-                        "rule": {
-                          "name": "nation",
-                          "type": "string",
-                          "group": "StringRules",
-                          "rule": "alpha",
-                          "casing": "mixed",
-                          "minLength": 10,
-                          "maxLength": 10
-                        }
-                      },
-                      "city": {
-                        "type": "string",
-                        "rule": {
-                          "name": "city",
-                          "type": "string",
-                          "group": "StringRules",
-                          "rule": "alpha",
-                          "casing": "mixed",
-                          "minLength": 10,
-                          "maxLength": 10
-                        }
-                      },
-                      "street": {
-                        "type": "string",
-                        "rule": {
-                          "name": "street",
-                          "type": "string",
-                          "group": "StringRules",
-                          "rule": "alpha",
-                          "casing": "mixed",
-                          "minLength": 10,
-                          "maxLength": 10
-                        }
-                      },
-                      "postalCode": {
-                        "type": "string",
-                        "rule": {
-                          "name": "postalCode",
-                          "type": "string",
-                          "group": "StringRules",
-                          "rule": "alpha",
-                          "casing": "mixed",
-                          "minLength": 10,
-                          "maxLength": 10
-                        }
-                      },
-                      "houseNumber": {
-                        "type": "string",
-                        "rule": {
-                          "name": "houseNumber",
-                          "type": "string",
-                          "group": "StringRules",
-                          "rule": "alpha",
-                          "casing": "mixed",
-                          "minLength": 10,
-                          "maxLength": 10
-                        }
-                      }
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "object",
+                "properties": {
+                  "country": {
+                    "type": "string",
+                    "rule": {
+                      "name": "country",
+                      "type": "string",
+                      "group": "LocationRules",
+                      "rule": "country"
                     }
                   },
-                  "subType": "object",
-                  "name": "address",
-                  "rule": {
-                    "name": "address",
-                    "type": "object"
-                  }
-                },
-                "addressNumber": {
-                  "type": "string",
-                  "rule": {
-                    "name": "addressNumber",
+                  "nation": {
                     "type": "string",
-                    "group": "StringRules",
-                    "rule": "alpha",
-                    "casing": "mixed",
-                    "minLength": 10,
-                    "maxLength": 10
-                  }
-                },
-                "dateFrom": {
-                  "type": "number",
-                  "rule": {
-                    "name": "dateFrom",
-                    "type": "number",
-                    "group": "NumberRules",
-                    "rule": "float",
-                    "minimum": 0,
-                    "maximum": 1000,
-                    "fractionDigits": 2
+                    "rule": {
+                      "name": "nation",
+                      "type": "string",
+                      "group": "LocationRules",
+                      "rule": "countryCode"
+                    }
+                  },
+                  "city": {
+                    "type": "string",
+                    "rule": {
+                      "name": "city",
+                      "type": "string",
+                      "group": "LocationRules",
+                      "rule": "city"
+                    }
+                  },
+                  "street": {
+                    "type": "string",
+                    "rule": {
+                      "name": "street",
+                      "type": "string",
+                      "group": "LocationRules",
+                      "rule": "street"
+                    }
+                  },
+                  "postalCode": {
+                    "type": "string",
+                    "rule": {
+                      "name": "postalCode",
+                      "type": "string",
+                      "group": "LocationRules",
+                      "rule": "zipCode"
+                    }
+                  },
+                  "houseNumber": {
+                    "type": "string",
+                    "rule": {
+                      "name": "houseNumber",
+                      "type": "string",
+                      "group": "LocationRules",
+                      "rule": "buildingNumber"
+                    }
                   }
                 }
+              },
+              "addressNumber": {
+                "type": "string",
+                "rule": {
+                  "name": "addressNumber",
+                  "type": "string",
+                  "group": "LocationRules",
+                  "rule": "buildingNumber"
+                }
+              },
+              "dateFrom": {
+                "type": "number",
+                "rule": {
+                  "name": "dateFrom",
+                  "type": "number",
+                  "group": "DateRules",
+                  "rule": "recent",
+                  "days": 3
+                }
               }
-            },
-            "subType": "object",
-            "name": "addressLink",
-            "rule": {
-              "name": "addressLink",
-              "type": "object"
             }
           },
           "partnerId": {
@@ -425,11 +370,10 @@ const sap =  {
             "rule": {
               "name": "partnerId",
               "type": "string",
-              "group": "StringRules",
-              "rule": "alpha",
-              "casing": "mixed",
-              "minLength": 10,
-              "maxLength": 10
+              "group": "NumberRules",
+              "rule": "int",
+              "minimum": 1,
+              "maximum": 100
             }
           },
           "businessPartnerType": {
@@ -445,70 +389,49 @@ const sap =  {
             }
           }
         }
-      },
-      "subType": "object",
-      "name": "businessPartner",
-      "rule": {
-        "name": "businessPartner",
-        "type": "object"
-      }
-    }
-  },
-  "publishSettings": {
-    "count": 0,
-    "interval": 1000,
-    "delay": 0
-  },
-  "mappings": [
-    {
-      "type": "Payload Parameter",
-      "source": {
-        "type": "Topic Parameter",
-        "name": "partnerId",
-        "fieldName": "partnerId",
-        "fieldType": "string"
-      },
-      "target": {
-        "type": "Payload Parameter",
-        "name": "businessPartner[0].partnerId",
-        "fieldName": "partnerId",
-        "fieldType": "string"
       }
     },
-    {
-      "type": "Payload Parameter",
-      "source": {
-        "type": "Payload Parameter",
-        "name": "businessPartner[0].addressLink[0].address[0].nation",
-        "fieldName": "nation",
-        "fieldType": "string"
-      },
-      "target": {
-        "type": "Payload Parameter",
-        "name": "businessPartner[0].addressLink[0].address[0].country",
-        "fieldName": "country",
-        "fieldType": "string"
-      }
+    "publishSettings": {
+      "count": 0,
+      "interval": 1000,
+      "delay": 0
     },
-    {
-      "type": "Topic Parameter",
-      "source": {
+    "mappings": [
+      {
         "type": "Payload Parameter",
-        "name": "businessPartner[0].addressLink[0].address[0].country",
-        "fieldName": "country",
-        "fieldType": "string"
+        "source": {
+          "type": "Topic Parameter",
+          "name": "partnerId",
+          "fieldName": "partnerId",
+          "fieldType": "string"
+        },
+        "target": {
+          "type": "Payload Parameter",
+          "name": "businessPartner.partnerId",
+          "fieldName": "partnerId",
+          "fieldType": "string"
+        }
       },
-      "target": {
-        "type": "Topic Parameter",
-        "name": "partnerId",
-        "fieldName": "partnerId",
-        "fieldType": "string"
+      {
+        "type": "Payload Parameter",
+        "source": {
+          "type": "Topic Parameter",
+          "name": "businessPartnerType",
+          "fieldName": "businessPartnerType",
+          "fieldType": "string"
+        },
+        "target": {
+          "type": "Payload Parameter",
+          "name": "businessPartner.businessPartnerType",
+          "fieldName": "businessPartnerType",
+          "fieldType": "string"
+        }
       }
-    }
-  ]
+    ]
 };
+
 
 const { payload, topic } = generateEvent(sap);
 
-console.log('Payload:\n', JSON.stringify(payload, null, 2));
 console.log('Topic:', topic);
+console.log('Payload:\n', JSON.stringify(payload, null, 2));
