@@ -2,8 +2,15 @@
   "name": "@solace-labs/solace-data-generator",
   "version": "1.0.9",
   "description": "This repo is an npm package used to generate random payloads and topics",
-  "main": "index.js",
   "type": "module",
+  "main": "./index.cjs",
+  "module": "./index.js",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "require": "./index.cjs"
+    }
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/solacecommunity/solace-data-generator"
@@ -12,6 +19,7 @@
     "access": "public"
   },
   "scripts": {
+    "build": "node build.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
