@@ -11,6 +11,9 @@
       "require": "./index.cjs"
     }
   },
+  "files": [
+    "src"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/solacecommunity/solace-data-generator"
