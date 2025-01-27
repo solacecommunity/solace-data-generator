@@ -3,16 +3,16 @@
   "version": "1.0.12",
   "description": "This repo is an npm package used to generate random payloads and topics",
   "type": "module",
-  "main": "./index.cjs",
-  "module": "./index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "exports": {
     ".": {
-      "import": "./index.js",
-      "require": "./index.cjs"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
   "files": [
-    "src"
+    "dist"
   ],
   "repository": {
     "type": "git",

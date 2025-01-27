@@ -1,4 +1,4 @@
-import { generateEvent } from '../index.js';
+import { generateEvent } from '../src/generator.js';
 
 const event = {
   "topic": "acmeretail/oracleRetailOrder/INSERT/V1/{CHANNEL}/{SALES_REP_ID}/{ORDER_ID}",
