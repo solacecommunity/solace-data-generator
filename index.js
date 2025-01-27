@@ -61,7 +61,7 @@ class SolaceDataGenerator {
             //    a. if its object --> process object
             //    b. if its non object --> generate content
             value.subType === 'object'
-              ? processObject(value.items.properties || value.items.properties || {})
+              ? processObject(value.items?.properties || value.properties || {})
               : generateContent(value)
           );
         } else {
