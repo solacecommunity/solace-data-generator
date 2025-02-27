@@ -8,7 +8,7 @@ class SolaceDataGenerator {
   static generateEvent(eventConfig) {
     let payload = SolaceDataGenerator.prototype.generateRandomPayload.call(this, eventConfig.payload);
     let {topic, topicValues, mappedTopicParams} = SolaceDataGenerator.prototype.generateRandomTopic.call(this, eventConfig, payload);
-    SolaceDataGenerator.prototype.applyPayloadMappings.call(this, eventConfig, topic, payload, topicValues, mappedTopicParams);
+    topic = SolaceDataGenerator.prototype.applyMappings.call(this, eventConfig, topic, payload, topicValues, mappedTopicParams);
     return {
       topic: topic,
       payload: payload
@@ -59,11 +59,14 @@ class SolaceDataGenerator {
           result[key] = Array.from({ length: arrayLength }, () =>
             // 2. Check the subtype here
             //    a. if its object --> process object
-            //    b. if its non object --> generate content
+            //    b. if its array --> process array
+            //    c. if its non object --> generate content
             value.subType === 'object'
-              ? processObject(value.items?.properties || value.properties || {})
-              : generateContent(value)
+              ? processObject(value?.items?.properties ? value.items.properties : value.properties || {})
+              : value.subType === 'array' ? processArray(value?.items || {}) : generateContent(value)
           );
+        } else if (typeof obj[key] === 'object' && !Object.keys(obj[key]).length) {
+          result[key] = {}; // empty object (should we consider undefined!!)
         } else {
           value.rule
             ? (result[key] = generateContent(value))
@@ -74,6 +77,23 @@ class SolaceDataGenerator {
       }
       return result;
     }
+
+    function processArray(obj) {
+      const data = [];
+      if (!obj.items || Object.keys(obj.items).length === 0) return data;
+      const count = obj.rule?.count || 2;
+      for (let i = 0; i < count; i++) {
+        if (obj.subType === 'object') {
+          data.push(processObject(obj.items?.properties || obj.properties | {}));
+        } else if (obj.subType === 'array') {
+          data.push(processArray(obj?.items || {}));
+        } else {
+          data.push(generateContent(obj));
+        }
+      }
+      return data;
+    }
+
     function capitalize(str) {
       return str.charAt(0).toUpperCase() + str.slice(1);
     }
@@ -91,33 +111,23 @@ class SolaceDataGenerator {
       // Process mappings for Topic Parameters
       for (const mapping of eventConfig.mappings) {
         if (mapping.target.type === 'Topic Parameter') {
-          // Get the value from payload using source field name
-          const payloadValue = payload[mapping.source.fieldName];
-          if (payloadValue !== undefined) {
-            // Replace the corresponding parameter in topic string
-            topic = topic.replace(
-              `{${mapping.target.fieldName}}`,
-              payloadValue
-            );
-            // Keep track of mapped parameters
-            mappedTopicParams.add(mapping.target.fieldName);
-          }
+          mappedTopicParams.add(mapping.target.fieldName);
         }
       }
     }
     // Handle remaining unmapped parameters with generated content
     for (const param of Object.keys(eventConfig.topicParameters)) {
       // Skip if parameter was already handled by mapping
+      const content = SolaceDataGenerator.prototype.generateContent.call(this, eventConfig.topicParameters[param]);
+      topicValues[`_${param}`] = content;
       if (!mappedTopicParams.has(param)) {
-        const content = SolaceDataGenerator.prototype.generateContent.call(this, eventConfig.topicParameters[param]);
         topic = topic.replace(`{${param}}`, content);
-        topicValues[`_${param}`] = content;
       }
     }
     return {topic, topicValues, mappedTopicParams};
   }
 
-  applyPayloadMappings(eventConfig, topic, payload, topicValues, mappedTopicParams) {
+  applyMappings(eventConfig, topic, payload, topicValues, mappedTopicParams) {
     let sourceVal = undefined
     // Process mappings for Payload Parameters
     if (eventConfig.mappings && eventConfig.mappings.length > 0) {
@@ -125,7 +135,7 @@ class SolaceDataGenerator {
         if (mapping.source.type === 'Payload Parameter') {
           // Get the value from payload using source field name
           let sourceName = mapping.source.name.replaceAll('.properties', '').replaceAll('[]', '');
-          const payloadValue = SolaceDataGenerator.prototype.getSourceFieldValue(payload, sourceName);
+          sourceVal = SolaceDataGenerator.prototype.getSourceFieldValue(payload, sourceName);
         } else {
           sourceVal = topicValues[`_${mapping.source.name}`];
         }
@@ -133,18 +143,20 @@ class SolaceDataGenerator {
           let targetName = mapping.target.name.replaceAll('.properties', '').replaceAll('[]', '')
           SolaceDataGenerator.prototype.setTargetFieldValue(payload, targetName, sourceVal)
         } else {
-            // Replace the corresponding parameter in topic string
-            for (const param of Object.keys(eventConfig.topicParameters)) {
-              if(param === mapping.source.name) {
-                if (mappedTopicParams.has(param)) {
-                  topic = topic.replace(`{${param}}`, sourceVal);
-                }
+          // Replace the corresponding parameter in topic string
+          for (const param of Object.keys(eventConfig.topicParameters)) {
+            if(param === mapping.target.name) {
+              if (mappedTopicParams.has(param)) {
+                topic = topic.replace(`{${param}}`, sourceVal);
               }
             }
           }
         }
       }
     }
+
+    return topic;
+  }
 
   getSourceFieldValue (obj, path) {
     if (path.indexOf('.') < 0)
@@ -213,7 +225,17 @@ class SolaceDataGenerator {
         rule.enum.forEach((t) => {
           enumObj[`'${t}'`] = t;
         });
-        return faker.helpers.enumValue(Object.freeze(enumObj));
+        let val = faker.helpers.enumValue(Object.freeze(enumObj));
+        switch (rule.type) {
+          case 'integer':
+            return parseInt(val);
+          case 'number':
+            return parseFloat(val);
+          case 'boolean':
+            return val.toLowerCase() === 'true';
+          default:
+            return val;
+        }
       case 'words':
         return faker.lorem.words(rule.count);
       case 'nanoid':
@@ -245,6 +267,8 @@ class SolaceDataGenerator {
         return faker.phone.number();
       case 'json':
         return faker.datatype.json();
+      case 'static':
+        return rule.static;
       default:
         return faker.string.alpha(10);
     }
@@ -277,7 +301,16 @@ class SolaceDataGenerator {
           fractionDigits: parseInt(rule.fractionDigits),
         };
         return faker.number.float(options);
+      case 'countUp':
+        var current = rule.current ?? rule.start;
+        rule.current = current + rule.change;
+        return current;
+      case 'countDown':
+        var current = rule.current ?? rule.start;
+        rule.current = current - rule.change;
+        return current;
       default:
+        console.log('Invalid/missing number rule: ' + rule.rule);
         return faker.number.int(100);
     }
   }
@@ -293,21 +326,78 @@ class SolaceDataGenerator {
 
   processDateRules(rule) {
     var options = {};
+    var formatter = new Intl.DateTimeFormat('en-US', {
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric',
+    });
+    
     switch (rule.rule) {
+      case 'timeStamp':
+        return Date.now();
+      case 'currentDate':
+        formatter = new Intl.DateTimeFormat('en-US', {
+          month: '2-digit',
+          day: '2-digit',
+          year: 'numeric',
+        });
+        var [{ value: month }, , { value: day }, , { value: year }] = formatter.formatToParts(new Date());
+        if (rule.format === 'MM-DD-YYYY')
+          return `${month}-${day}-${year}`;
+        else if (rule.format === 'DD-MM-YYYY')
+          return `${day}-${month}-${year}`;
+        else
+          return `${month}-${day}-${year}`;
+      case 'currentDateWithTime':
+        formatter = new Intl.DateTimeFormat("en-US", {
+          month: '2-digit',
+          day: '2-digit',
+          year: 'numeric',
+        });
+
+        var date = new Date();
+        var [{ value: month }, , { value: day }, , { value: year }] = formatter.formatToParts(date);
+
+        // Extract time components
+        const hours24 = date.getHours();
+        const hours12 = hours24 % 12 || 12; // Convert to 12-hour format
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        const amPm = hours24 < 12 ? 'AM' : 'PM';
+  
+        if (rule.format === 'MM-DD-YYYY HH:mm:ss')
+          return `${month}-${day}-${year} ${String(hours24).padStart(2, '0')}:${minutes}:${seconds}`;
+        else if (rule.format === 'MM-DD-YYYY hh:mm:ss a')
+          return `${month}-${day}-${year} ${hours12}:${minutes}:${seconds} ${amPm}`;
+        else if (rule.format === 'DD-MM-YYYY HH:mm:ss')
+          return `${day}-${month}-${year} ${String(hours24).padStart(2, '0')}:${minutes}:${seconds}`;
+        else if (rule.format === 'DD-MM-YYYY hh:mm:ss a')
+          return `${day}-${month}-${year} ${hours12}:${minutes}:${seconds} ${amPm}`;
+        else
+          return `${month}-${day}-${year} ${String(hours24).padStart(2, '0')}:${minutes}:${seconds}`;
+      case 'currentTime':
+        formatter = new Intl.DateTimeFormat("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: rule.format.endsWith('a') ? true : false,
+        });
+    
+        return formatter.format(new Date());
       case 'anytime':
-        return faker.date.anytime();
+        return new Date(faker.date.anytime()).toDateString();
       case 'future':
-        options = { years: rule.years };
-        return faker.date.future(options);
+        options = { years: rule.years }
+        return new Date(faker.date.future(options)).toDateString();
       case 'past':
-        options = { years: rule.years };
-        return faker.date.past(options);
+        options = { years: rule.years }
+        return new Date(faker.date.past(options)).toDateString();
       case 'recent':
         options = { days: rule.days };
-        return faker.date.recent(options);
+        return new Date(faker.date.recent(options)).toDateString();
       case 'soon':
         options = { days: rule.days };
-        return faker.date.soon(options);
+        return new Date(faker.date.soon(options)).toDateString();
       case 'month':
         options = { abbreviated: rule.abbreviated };
         return faker.date.month(options);
@@ -512,14 +602,13 @@ class SolaceDataGenerator {
   }
 
   processInternetRules(rule) {
-    var data = [];
     switch (rule.rule) {
       case 'domainName':
         return rule.casing === 'mixed' ? faker.internet.domainName() : rule.casing === 'upper' ? faker.internet.domainName().toUpperCase() : faker.internet.domainName().toLowerCase();
       case 'domainWord':
-        return rule.casing === 'mixed' ? faker.internet.domainWord() : rule.casing === 'upper' ? faker.internet.domainName().toUpperCase() : faker.internet.domainName().toLowerCase();
+        return rule.casing === 'mixed' ? faker.internet.domainWord() : rule.casing === 'upper' ? faker.internet.domainWord().toUpperCase() : faker.internet.domainWord().toLowerCase();
       case 'email':
-        return rule.casing === 'mixed' ? faker.internet.email() : rule.casing === 'upper' ? faker.internet.domainName().toUpperCase() : faker.internet.domainName().toLowerCase();
+        return rule.casing === 'mixed' ? faker.internet.email() : rule.casing === 'upper' ? faker.internet.email().toUpperCase() : faker.internet.email().toLowerCase();
       case 'emoji':
         return faker.internet.emoji();
       case 'ipv4':
@@ -529,9 +618,9 @@ class SolaceDataGenerator {
       case 'mac':
         return faker.internet.mac();
       case 'url':
-        return rule.casing === 'mixed' ? faker.internet.url() : rule.casing === 'upper' ? faker.internet.domainName().toUpperCase() : faker.internet.domainName().toLowerCase();
+        return rule.casing === 'mixed' ? faker.internet.url() : rule.casing === 'upper' ? faker.internet.url().toUpperCase() : faker.internet.url().toLowerCase();
       case 'username':
-        return rule.casing === 'mixed' ? faker.internet.username() : rule.casing === 'upper' ? faker.internet.domainName().toUpperCase() : faker.internet.domainName().toLowerCase();
+        return rule.casing === 'mixed' ? faker.internet.username() : rule.casing === 'upper' ? faker.internet.username().toUpperCase() : faker.internet.username().toLowerCase();
     }
   }
 }
